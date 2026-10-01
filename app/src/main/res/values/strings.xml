@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">GPSTracker</string>
+    <string name="notification_channel_name">Live tracking</string>
+    <string name="notification_channel_desc">Shown only while live tracking is running</string>
+    <string name="notification_title">Live tracking is on</string>
+    <string name="notification_text">%1$s</string>
+    <string name="notification_text_waiting">Waiting for GPS…</string>
+</resources>

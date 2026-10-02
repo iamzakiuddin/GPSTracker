@@ -9,9 +9,9 @@ import com.apps.gpstracker.permission.LocationPermissions
 class TrackerViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = LocationRepository.get(application)
 
-    val savedFix = repository.savedFix
-    val currentFix = repository.currentFix
-    val liveFix = repository.liveFix
+    val cachedLocation = repository.cachedLocation
+    val latestLocation = repository.latestLocation
+    val liveLocation = repository.liveLocation
     val isLiveTracking = repository.isLiveTracking
     val gpsOn = repository.gpsOn
 

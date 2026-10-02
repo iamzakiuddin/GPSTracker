@@ -1,12 +1,13 @@
 package com.apps.gpstracker.location
 
-import android.annotation.SuppressLint
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Looper
-import com.apps.gpstracker.permission.LocationPermissions
+import androidx.core.content.ContextCompat
 import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -20,68 +21,87 @@ class LocationHelper(context: Context) {
     private val fused = LocationServices.getFusedLocationProviderClient(appContext)
     private val locationManager = appContext.getSystemService(LocationManager::class.java)
     private var liveCallback: LocationCallback? = null
-    private val gpsListener = LocationListener { location -> notifyLive(location) }
-    private val networkListener = LocationListener { location -> notifyLive(location) }
-    private var onLiveFix: ((LocationFix) -> Unit)? = null
+    private val gpsListener = LocationListener { location -> publishIfBetter(location) }
+    private val networkListener = LocationListener { location -> publishIfBetter(location) }
+    private var onLiveLocation: ((DeviceLocation) -> Unit)? = null
+    private var lastPublished: DeviceLocation? = null
 
-    @SuppressLint("MissingPermission")
-    fun getCurrentFix(onResult: (LocationFix?) -> Unit) {
-        if (!LocationPermissions.hasAnyLocation(appContext)) {
+    fun getLatestLocation(onResult: (DeviceLocation?) -> Unit) {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fineGranted && !coarseGranted) {
             onResult(null)
             return
         }
 
-        val precise = LocationPermissions.hasPreciseLocation(appContext)
         val request = CurrentLocationRequest.Builder()
-            .setPriority(if (precise) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+            .setPriority(
+                if (fineGranted) Priority.PRIORITY_HIGH_ACCURACY
+                else Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+            )
             .setMaxUpdateAgeMillis(15_000L)
             .build()
 
-        fused.getCurrentLocation(request, CancellationTokenSource().token)
-            .addOnSuccessListener { location ->
-                if (location != null) {
-                    onResult(LocationFix.from(location))
-                } else {
-                    onResult(lastKnownFix())
+        try {
+            fused.getCurrentLocation(request, CancellationTokenSource().token)
+                .addOnSuccessListener { location ->
+                    if (location != null) {
+                        onResult(DeviceLocation.from(location))
+                    } else {
+                        onResult(lastKnownLocation())
+                    }
                 }
-            }
-            .addOnFailureListener {
-                onResult(lastKnownFix())
-            }
+                .addOnFailureListener {
+                    onResult(lastKnownLocation())
+                }
+        } catch (_: SecurityException) {
+            onResult(lastKnownLocation())
+        }
     }
 
-    @SuppressLint("MissingPermission")
-    fun startLiveUpdates(onFix: (LocationFix) -> Unit) {
+    fun startLiveUpdates(onLocation: (DeviceLocation) -> Unit) {
         stopLiveUpdates()
-        if (!LocationPermissions.hasAnyLocation(appContext)) return
+        val fineGranted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fineGranted && !coarseGranted) return
 
-        onLiveFix = onFix
-        val precise = LocationPermissions.hasPreciseLocation(appContext)
-        val priority = if (precise) {
-            Priority.PRIORITY_HIGH_ACCURACY
-        } else {
-            Priority.PRIORITY_BALANCED_POWER_ACCURACY
-        }
-
-        val request = LocationRequest.Builder(priority, 3_000L)
-            .setMinUpdateIntervalMillis(1_000L)
-            .setMinUpdateDistanceMeters(1f)
+        onLiveLocation = onLocation
+        lastPublished = null
+        val settings = LocationUpdatePolicy.current(appContext, lastAccuracyMeters = null)
+        val request = LocationRequest.Builder(settings.priority, settings.intervalMs)
+            .setMinUpdateIntervalMillis(settings.minIntervalMs)
+            .setMinUpdateDistanceMeters(settings.minDistanceMeters)
             .build()
 
         val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { notifyLive(it) }
+                result.lastLocation?.let { publishIfBetter(it) }
             }
         }
         liveCallback = callback
-        fused.requestLocationUpdates(request, callback, Looper.getMainLooper())
 
         try {
-            if (precise && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            fused.requestLocationUpdates(request, callback, Looper.getMainLooper())
+
+            if (fineGranted &&
+                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            ) {
                 locationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    3_000L,
-                    1f,
+                    settings.intervalMs,
+                    settings.minDistanceMeters,
                     gpsListener,
                     Looper.getMainLooper(),
                 )
@@ -89,14 +109,14 @@ class LocationHelper(context: Context) {
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    5_000L,
-                    5f,
+                    maxOf(settings.intervalMs, 5_000L),
+                    maxOf(settings.minDistanceMeters, 5f),
                     networkListener,
                     Looper.getMainLooper(),
                 )
             }
         } catch (_: SecurityException) {
-            // Permission was turned off while we were starting.
+            // Permission was revoked while updates were starting.
         }
     }
 
@@ -105,39 +125,97 @@ class LocationHelper(context: Context) {
         liveCallback = null
         runCatching { locationManager.removeUpdates(gpsListener) }
         runCatching { locationManager.removeUpdates(networkListener) }
-        onLiveFix = null
+        onLiveLocation = null
+        lastPublished = null
     }
 
-    @SuppressLint("MissingPermission")
-    private fun lastKnownFix(): LocationFix? {
-        if (!LocationPermissions.hasAnyLocation(appContext)) return null
-        val gps = if (LocationPermissions.hasPreciseLocation(appContext)) {
-            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-        } else {
-            null
-        }
-        val network = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-        val best = listOfNotNull(gps, network).maxByOrNull { it.time }
-        return best?.let { LocationFix.from(it) }
-    }
-
-    @SuppressLint("MissingPermission")
-    fun readSystemLastKnown(onResult: (LocationFix?) -> Unit) {
-        if (!LocationPermissions.hasAnyLocation(appContext)) {
+    fun readSystemLastKnown(onResult: (DeviceLocation?) -> Unit) {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fineGranted && !coarseGranted) {
             onResult(null)
             return
         }
-        fused.lastLocation
-            .addOnSuccessListener { location ->
-                val system = lastKnownFix()
-                val fusedFix = location?.let { LocationFix.from(it) }
-                val best = listOfNotNull(fusedFix, system).maxByOrNull { it.timeMillis }
-                onResult(best)
-            }
-            .addOnFailureListener { onResult(lastKnownFix()) }
+        try {
+            fused.lastLocation
+                .addOnSuccessListener { location ->
+                    val system = lastKnownLocation()
+                    val fusedLocation = location?.let { DeviceLocation.from(it) }
+                    val newest = listOfNotNull(fusedLocation, system).maxByOrNull { it.timeMillis }
+                    onResult(newest)
+                }
+                .addOnFailureListener { onResult(lastKnownLocation()) }
+        } catch (_: SecurityException) {
+            onResult(lastKnownLocation())
+        }
     }
 
-    private fun notifyLive(location: Location) {
-        onLiveFix?.invoke(LocationFix.from(location))
+    private fun lastKnownLocation(): DeviceLocation? {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fineGranted && !coarseGranted) return null
+        return try {
+            val gps = if (fineGranted) {
+                locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            } else {
+                null
+            }
+            val network = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            listOfNotNull(gps, network).maxByOrNull { it.time }?.let { DeviceLocation.from(it) }
+        } catch (_: SecurityException) {
+            null
+        }
+    }
+
+    private fun publishIfBetter(location: Location) {
+        if (!location.hasAccuracy()) return
+        val candidate = DeviceLocation.from(location)
+        if (!isBetterLocation(candidate, lastPublished)) return
+        lastPublished = candidate
+        onLiveLocation?.invoke(candidate)
+    }
+
+    /**
+     * Near tall buildings GNSS can jump to a new but much less accurate point.
+     * Keep the last good location until a newer and reasonably accurate one arrives.
+     */
+    private fun isBetterLocation(
+        candidate: DeviceLocation,
+        current: DeviceLocation?,
+    ): Boolean {
+        if (current == null) return candidate.accuracyMeters <= MAX_USABLE_ACCURACY_METERS
+        if (candidate.accuracyMeters > MAX_USABLE_ACCURACY_METERS &&
+            current.accuracyMeters <= MAX_USABLE_ACCURACY_METERS
+        ) {
+            return false
+        }
+        val ageMs = candidate.timeMillis - current.timeMillis
+        if (ageMs < -20_000L) return false
+        if (ageMs in 0 until 45_000 &&
+            current.accuracyMeters <= 50f &&
+            candidate.accuracyMeters > current.accuracyMeters * 2.5f
+        ) {
+            return false
+        }
+        if (ageMs > 20_000L && candidate.accuracyMeters - current.accuracyMeters <= 50f) {
+            return true
+        }
+        return candidate.accuracyMeters < current.accuracyMeters || ageMs > 0
+    }
+
+    companion object {
+        private const val MAX_USABLE_ACCURACY_METERS = 250f
     }
 }

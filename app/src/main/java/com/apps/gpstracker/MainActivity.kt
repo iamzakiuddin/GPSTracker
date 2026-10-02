@@ -116,7 +116,18 @@ class MainActivity : ComponentActivity() {
                             refresh++
                             viewModel.refreshOnResume()
                             if (!LocationPermissions.hasAnyLocation(context)) {
-                                askLocationPermission()
+                                val blocked = askedOnce &&
+                                    !ActivityCompat.shouldShowRequestPermissionRationale(
+                                        activity,
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                    ) &&
+                                    !ActivityCompat.shouldShowRequestPermissionRationale(
+                                        activity,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                                    )
+                                if (!blocked) {
+                                    askLocationPermission()
+                                }
                             }
                         }
                     }

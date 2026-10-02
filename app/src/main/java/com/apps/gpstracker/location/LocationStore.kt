@@ -6,19 +6,19 @@ class LocationStore(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences("saved_location", Context.MODE_PRIVATE)
 
-    fun save(fix: LocationFix) {
+    fun save(location: DeviceLocation) {
         prefs.edit()
-            .putString("lat", fix.latitude.toString())
-            .putString("lon", fix.longitude.toString())
-            .putFloat("accuracy", fix.accuracyMeters)
-            .putLong("time", fix.timeMillis)
+            .putString("lat", location.latitude.toString())
+            .putString("lon", location.longitude.toString())
+            .putFloat("accuracy", location.accuracyMeters)
+            .putLong("time", location.timeMillis)
             .apply()
     }
 
-    fun load(): LocationFix? {
+    fun load(): DeviceLocation? {
         val lat = prefs.getString("lat", null)?.toDoubleOrNull() ?: return null
         val lon = prefs.getString("lon", null)?.toDoubleOrNull() ?: return null
-        return LocationFix(
+        return DeviceLocation(
             latitude = lat,
             longitude = lon,
             accuracyMeters = prefs.getFloat("accuracy", 0f),

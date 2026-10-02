@@ -25,7 +25,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.apps.gpstracker.location.LocationFix
+import com.apps.gpstracker.location.DeviceLocation
 import java.util.Date
 import java.util.Locale
 
@@ -37,9 +37,9 @@ fun TrackerScreen(
     onTurnOnGps: () -> Unit,
     onAllowPrecise: () -> Unit,
 ) {
-    val saved by viewModel.savedFix.collectAsStateWithLifecycle()
-    val current by viewModel.currentFix.collectAsStateWithLifecycle()
-    val live by viewModel.liveFix.collectAsStateWithLifecycle()
+    val cached by viewModel.cachedLocation.collectAsStateWithLifecycle()
+    val latest by viewModel.latestLocation.collectAsStateWithLifecycle()
+    val live by viewModel.liveLocation.collectAsStateWithLifecycle()
     val tracking by viewModel.isLiveTracking.collectAsStateWithLifecycle()
     val gpsOn by viewModel.gpsOn.collectAsStateWithLifecycle()
 
@@ -57,7 +57,7 @@ fun TrackerScreen(
             if (!gpsOn) {
                 InfoCard(
                     title = "GPS is off",
-                    body = "Please turn on location / GPS to get a current fix and live updates.",
+                    body = "Please turn on GPS to get your current position and live updates.",
                     buttonText = "Turn on GPS",
                     onButton = onTurnOnGps,
                     warning = true,
@@ -67,7 +67,7 @@ fun TrackerScreen(
             if (!isPrecise) {
                 InfoCard(
                     title = "Approximate location",
-                    body = "You allowed Approximate location. The app still works, but GPS is less accurate. Allow Precise for a better fix near buildings.",
+                    body = "You allowed Approximate location. The app still works, but GPS is less accurate. Allow Precise for a better reading near tall buildings.",
                     buttonText = "Allow precise location",
                     onButton = onAllowPrecise,
                     warning = false,
@@ -75,12 +75,12 @@ fun TrackerScreen(
             }
 
             if (!tracking) {
-                CurrentOrSavedCard(currentFix = current, savedFix = saved)
+                CurrentOrSavedCard(latestLocation = latest, cachedLocation = cached)
             }
 
             LiveTrackingCard(
                 tracking = tracking,
-                liveFix = live,
+                liveLocation = live,
                 gpsOn = gpsOn,
                 onStart = { viewModel.startLiveTracking() },
                 onStop = { viewModel.stopLiveTracking() },
@@ -90,29 +90,32 @@ fun TrackerScreen(
 }
 
 @Composable
-private fun CurrentOrSavedCard(currentFix: LocationFix?, savedFix: LocationFix?) {
-    val showCurrent = currentFix != null
-    val fix = currentFix ?: savedFix
+private fun CurrentOrSavedCard(
+    latestLocation: DeviceLocation?,
+    cachedLocation: DeviceLocation?,
+) {
+    val showLatest = latestLocation != null
+    val location = latestLocation ?: cachedLocation
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 text = when {
-                    showCurrent -> "Current location"
-                    fix != null -> "Saved location"
+                    showLatest -> "Current location"
+                    location != null -> "Saved location"
                     else -> "Current location"
                 },
                 style = MaterialTheme.typography.titleLarge,
             )
-            if (fix == null) {
+            if (location == null) {
                 Text("No location yet. Waiting for GPS or a last known location.")
             } else {
-                if (!showCurrent) {
+                if (!showLatest) {
                     Text(
-                        "Could not get a fresh location. Showing the last known saved location.",
+                        "Could not get a new location. Showing the last known saved location.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Coordinates(fix, big = false)
+                Coordinates(location, big = false)
             }
         }
     }
@@ -121,7 +124,7 @@ private fun CurrentOrSavedCard(currentFix: LocationFix?, savedFix: LocationFix?)
 @Composable
 private fun LiveTrackingCard(
     tracking: Boolean,
-    liveFix: LocationFix?,
+    liveLocation: DeviceLocation?,
     gpsOn: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
@@ -139,11 +142,11 @@ private fun LiveTrackingCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Live location", style = MaterialTheme.typography.titleLarge)
             if (tracking) {
-                Text("Continuous updates are running.")
-                if (liveFix == null) {
-                    Text("Waiting for the next GPS update…")
+                Text("Continuous updates are running in the background.")
+                if (liveLocation == null) {
+                    Text("Waiting for the next location update…")
                 } else {
-                    Coordinates(liveFix, big = true)
+                    Coordinates(liveLocation, big = true)
                 }
                 OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
                     Text("Stop live tracking")
@@ -163,20 +166,24 @@ private fun LiveTrackingCard(
 }
 
 @Composable
-private fun Coordinates(fix: LocationFix, big: Boolean) {
+private fun Coordinates(location: DeviceLocation, big: Boolean) {
     val context = LocalContext.current
     val size = if (big) 28.sp else 20.sp
     Text(
-        text = String.format(Locale.US, "%.6f", fix.latitude),
+        text = String.format(Locale.US, "%.6f", location.latitude),
         fontSize = size,
         fontFamily = FontFamily.Monospace,
     )
     Text(
-        text = String.format(Locale.US, "%.6f", fix.longitude),
+        text = String.format(Locale.US, "%.6f", location.longitude),
         fontSize = size,
         fontFamily = FontFamily.Monospace,
     )
-    Text("Accuracy ±${fix.accuracyMeters.toInt()} m")
+    Text("Accuracy ±${location.accuracyMeters.toInt()} m")
+    if (location.timeMillis > 0L) {
+        val time = DateFormat.getTimeFormat(context).format(Date(location.timeMillis))
+        Text("Updated $time")
+    }
 }
 
 @Composable

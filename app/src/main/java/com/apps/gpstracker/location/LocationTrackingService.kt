@@ -1,8 +1,10 @@
 package com.apps.gpstracker.location
 
+import android.Manifest
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -18,7 +20,7 @@ class LocationTrackingService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) {
             repository.refreshGps()
             if (LocationPermissions.isGpsOn(this@LocationTrackingService) &&
-                LocationPermissions.hasAnyLocation(this@LocationTrackingService)
+                hasLocationPermission()
             ) {
                 startUpdates()
             }
@@ -41,12 +43,12 @@ class LocationTrackingService : Service() {
             return START_NOT_STICKY
         }
 
-        if (!LocationPermissions.hasAnyLocation(this)) {
+        if (!hasLocationPermission()) {
             stopEverything()
             return START_NOT_STICKY
         }
 
-        val notification = TrackingNotifier.build(this, repository.liveFix.value)
+        val notification = TrackingNotifier.build(this, repository.liveLocation.value)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceCompat.startForeground(
@@ -65,14 +67,41 @@ class LocationTrackingService : Service() {
 
         repository.setLiveTracking(true)
         startUpdates()
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private fun startUpdates() {
-        repository.helper.startLiveUpdates { fix ->
-            repository.onLiveLocation(fix)
+        val fineGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fineGranted && !coarseGranted) return
+
+        try {
+            repository.helper.startLiveUpdates { location ->
+                repository.onLiveLocation(location)
+                updateNotification(location)
+            }
+        } catch (_: SecurityException) {
+        }
+    }
+
+    private fun updateNotification(location: DeviceLocation) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val notificationsGranted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!notificationsGranted) return
+        }
+        try {
             NotificationManagerCompat.from(this)
-                .notify(TrackingNotifier.NOTIFICATION_ID, TrackingNotifier.build(this, fix))
+                .notify(TrackingNotifier.NOTIFICATION_ID, TrackingNotifier.build(this, location))
+        } catch (_: SecurityException) {
         }
     }
 
@@ -97,6 +126,18 @@ class LocationTrackingService : Service() {
         stopSelf()
     }
 
+    private fun hasLocationPermission(): Boolean {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        return fineGranted || coarseGranted
+    }
+
     companion object {
         const val ACTION_STOP = "com.apps.gpstracker.STOP_LIVE"
 
@@ -105,7 +146,7 @@ class LocationTrackingService : Service() {
             try {
                 ContextCompat.startForegroundService(context, intent)
             } catch (_: Exception) {
-                // Cannot start if the app is not in the foreground.
+
             }
         }
 

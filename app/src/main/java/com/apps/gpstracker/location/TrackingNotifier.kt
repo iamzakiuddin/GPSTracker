@@ -29,17 +29,17 @@ object TrackingNotifier {
         manager.createNotificationChannel(channel)
     }
 
-    fun build(context: Context, fix: LocationFix?): Notification {
+    fun build(context: Context, location: DeviceLocation?): Notification {
         val openApp = PendingIntent.getActivity(
             context,
             0,
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val text = if (fix == null) {
+        val text = if (location == null) {
             context.getString(R.string.notification_text_waiting)
         } else {
-            String.format(Locale.US, "%.5f, %.5f", fix.latitude, fix.longitude)
+            String.format(Locale.US, "%.5f, %.5f", location.latitude, location.longitude)
         }
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_location)

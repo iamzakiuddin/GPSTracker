@@ -10,19 +10,20 @@ import com.apps.gpstracker.permission.LocationPermissions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+
 class LocationRepository private constructor(context: Context) {
     private val appContext = context.applicationContext
     private val store = LocationStore(appContext)
     val helper = LocationHelper(appContext)
 
-    private val _savedFix = MutableStateFlow(store.load())
-    val savedFix: StateFlow<LocationFix?> = _savedFix.asStateFlow()
+    private val _cachedLocation = MutableStateFlow(store.load())
+    val cachedLocation: StateFlow<DeviceLocation?> = _cachedLocation.asStateFlow()
 
-    private val _currentFix = MutableStateFlow<LocationFix?>(null)
-    val currentFix: StateFlow<LocationFix?> = _currentFix.asStateFlow()
+    private val _latestLocation = MutableStateFlow<DeviceLocation?>(null)
+    val latestLocation: StateFlow<DeviceLocation?> = _latestLocation.asStateFlow()
 
-    private val _liveFix = MutableStateFlow<LocationFix?>(null)
-    val liveFix: StateFlow<LocationFix?> = _liveFix.asStateFlow()
+    private val _liveLocation = MutableStateFlow<DeviceLocation?>(null)
+    val liveLocation: StateFlow<DeviceLocation?> = _liveLocation.asStateFlow()
 
     private val _isLiveTracking = MutableStateFlow(false)
     val isLiveTracking: StateFlow<Boolean> = _isLiveTracking.asStateFlow()
@@ -55,10 +56,10 @@ class LocationRepository private constructor(context: Context) {
 
     fun loadCurrentLocation() {
         refreshGps()
-        helper.getCurrentFix { fresh ->
-            if (fresh != null) {
-                _currentFix.value = fresh
-                save(fresh)
+        helper.getLatestLocation { latest ->
+            if (latest != null) {
+                _latestLocation.value = latest
+                save(latest)
             } else {
                 helper.readSystemLastKnown { lastKnown ->
                     if (lastKnown != null) {
@@ -69,22 +70,22 @@ class LocationRepository private constructor(context: Context) {
         }
     }
 
-    fun onLiveLocation(fix: LocationFix) {
-        _liveFix.value = fix
-        _currentFix.value = fix
-        save(fix)
+    fun onLiveLocation(location: DeviceLocation) {
+        _liveLocation.value = location
+        _latestLocation.value = location
+        save(location)
     }
 
     fun setLiveTracking(on: Boolean) {
         _isLiveTracking.value = on
         if (!on) {
-            _liveFix.value = null
+            _liveLocation.value = null
         }
     }
 
-    private fun save(fix: LocationFix) {
-        store.save(fix)
-        _savedFix.value = fix
+    private fun save(location: DeviceLocation) {
+        store.save(location)
+        _cachedLocation.value = location
     }
 
     companion object {

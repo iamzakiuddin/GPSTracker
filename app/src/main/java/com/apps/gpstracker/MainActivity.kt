@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -47,12 +48,15 @@ class MainActivity : ComponentActivity() {
                 val lifecycleOwner = LocalLifecycleOwner.current
 
                 var refresh by remember { mutableIntStateOf(0) }
-                var askedOnce by remember { mutableStateOf(false) }
+                var askedLocationOnce by remember { mutableStateOf(false) }
+                var askedNotificationOnce by remember { mutableStateOf(false) }
 
                 val hasAny = remember(refresh) { LocationPermissions.hasAnyLocation(context) }
                 val isPrecise = remember(refresh) { LocationPermissions.hasPreciseLocation(context) }
-                val blockedForever = remember(refresh, askedOnce, hasAny) {
-                    askedOnce &&
+                val hasNotification = remember(refresh) { LocationPermissions.hasNotificationPermission(context) }
+
+                val blockedLocationForever = remember(refresh, askedLocationOnce, hasAny) {
+                    askedLocationOnce &&
                         !hasAny &&
                         !ActivityCompat.shouldShowRequestPermissionRationale(
                             activity,
@@ -64,13 +68,32 @@ class MainActivity : ComponentActivity() {
                         )
                 }
 
-                val permissionLauncher = rememberLauncherForActivityResult(
+                val blockedNotificationForever = remember(refresh, askedNotificationOnce, hasNotification) {
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        askedNotificationOnce &&
+                        !hasNotification &&
+                        !ActivityCompat.shouldShowRequestPermissionRationale(
+                            activity,
+                            Manifest.permission.POST_NOTIFICATIONS,
+                        )
+                }
+
+                val locationPermissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions(),
                 ) {
-                    askedOnce = true
+                    askedLocationOnce = true
                     refresh++
                     viewModel.refreshOnResume()
                 }
+
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission(),
+                ) {
+                    askedNotificationOnce = true
+                    refresh++
+                    viewModel.refreshOnResume()
+                }
+
                 val gpsLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.StartIntentSenderForResult(),
                 ) {
@@ -79,7 +102,13 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun askLocationPermission() {
-                    permissionLauncher.launch(LocationPermissions.requestList())
+                    locationPermissionLauncher.launch(LocationPermissions.locationRequestList())
+                }
+
+                fun askNotificationPermission() {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
                 }
 
                 fun openAppSettings() {
@@ -115,20 +144,6 @@ class MainActivity : ComponentActivity() {
                         if (event == Lifecycle.Event.ON_RESUME) {
                             refresh++
                             viewModel.refreshOnResume()
-                            if (!LocationPermissions.hasAnyLocation(context)) {
-                                val blocked = askedOnce &&
-                                    !ActivityCompat.shouldShowRequestPermissionRationale(
-                                        activity,
-                                        Manifest.permission.ACCESS_FINE_LOCATION,
-                                    ) &&
-                                    !ActivityCompat.shouldShowRequestPermissionRationale(
-                                        activity,
-                                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                                    )
-                                if (!blocked) {
-                                    askLocationPermission()
-                                }
-                            }
                         }
                     }
                     lifecycleOwner.lifecycle.addObserver(observer)
@@ -137,9 +152,9 @@ class MainActivity : ComponentActivity() {
 
                 if (!hasAny) {
                     AskLocationScreen(
-                        blockedForever = blockedForever,
+                        blockedForever = blockedLocationForever,
                         onAllow = {
-                            if (blockedForever) openAppSettings() else askLocationPermission()
+                            if (blockedLocationForever) openAppSettings() else askLocationPermission()
                         },
                         onOpenSettings = { openAppSettings() },
                     )
@@ -147,8 +162,12 @@ class MainActivity : ComponentActivity() {
                     TrackerScreen(
                         viewModel = viewModel,
                         isPrecise = isPrecise,
+                        hasNotificationPermission = hasNotification,
+                        blockedNotificationForever = blockedNotificationForever,
                         onTurnOnGps = { turnOnGps() },
                         onAllowPrecise = { askLocationPermission() },
+                        onRequestNotificationPermission = { askNotificationPermission() },
+                        onOpenSettings = { openAppSettings() },
                     )
                 }
             }

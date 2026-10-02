@@ -26,20 +26,29 @@ object LocationPermissions {
         return hasPreciseLocation(context) || hasApproximateLocation(context)
     }
 
-    fun isGpsOn(context: Context): Boolean {
-        val manager = context.getSystemService(LocationManager::class.java)
-        return manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-            manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+    fun hasNotificationPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
     }
 
-    fun requestList(): Array<String> {
-        val list = mutableListOf(
+    fun isGpsOn(context: Context): Boolean {
+        val manager = context.getSystemService(LocationManager::class.java)
+        return manager?.run {
+            isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        } ?: false
+    }
+
+    fun locationRequestList(): Array<String> {
+        return arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            list += Manifest.permission.POST_NOTIFICATIONS
-        }
-        return list.toTypedArray()
     }
 }

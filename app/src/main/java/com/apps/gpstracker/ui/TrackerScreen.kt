@@ -1,5 +1,6 @@
 package com.apps.gpstracker.ui
 
+import android.os.Build
 import android.text.format.DateFormat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -34,8 +35,12 @@ import java.util.Locale
 fun TrackerScreen(
     viewModel: TrackerViewModel,
     isPrecise: Boolean,
+    hasNotificationPermission: Boolean,
+    blockedNotificationForever: Boolean,
     onTurnOnGps: () -> Unit,
     onAllowPrecise: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val cached by viewModel.cachedLocation.collectAsStateWithLifecycle()
     val latest by viewModel.latestLocation.collectAsStateWithLifecycle()
@@ -82,8 +87,12 @@ fun TrackerScreen(
                 tracking = tracking,
                 liveLocation = live,
                 gpsOn = gpsOn,
+                hasNotificationPermission = hasNotificationPermission,
+                blockedNotificationForever = blockedNotificationForever,
                 onStart = { viewModel.startLiveTracking() },
                 onStop = { viewModel.stopLiveTracking() },
+                onRequestNotificationPermission = onRequestNotificationPermission,
+                onOpenSettings = onOpenSettings,
             )
         }
     }
@@ -126,8 +135,12 @@ private fun LiveTrackingCard(
     tracking: Boolean,
     liveLocation: DeviceLocation?,
     gpsOn: Boolean,
+    hasNotificationPermission: Boolean,
+    blockedNotificationForever: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -153,12 +166,46 @@ private fun LiveTrackingCard(
                 }
             } else {
                 Text("Tap the button to start continuous location tracking.")
-                Button(
-                    onClick = onStart,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = gpsOn,
-                ) {
-                    Text("Start live GPS tracking")
+
+                val needsNotificationWarning =
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission
+
+                if (needsNotificationWarning) {
+                    Text(
+                        text = if (blockedNotificationForever) {
+                            "App needs notification permission to work properly for live tracking. Permission is blocked in settings."
+                        } else {
+                            "App needs notification permission to work properly for live background tracking."
+                        },
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+
+                if (needsNotificationWarning) {
+                    if (blockedNotificationForever) {
+                        Button(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Open Settings for Notifications")
+                        }
+                    } else {
+                        Button(
+                            onClick = onRequestNotificationPermission,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Allow notification permission")
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = onStart,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = gpsOn,
+                    ) {
+                        Text("Start live GPS tracking")
+                    }
                 }
             }
         }
@@ -229,23 +276,19 @@ fun AskLocationScreen(
         Text("Location permission needed", style = MaterialTheme.typography.headlineSmall)
         Text(
             if (blockedForever) {
-                "Location is blocked. Open Settings and allow location (Precise is best)."
+                "Location permission is blocked. Please open App Settings and grant location permission (Precise is recommended)."
             } else {
-                "Please allow location so the app can show your current position. Precise location is more accurate."
+                "Please allow location permission so the app can show your current position. Precise location is more accurate."
             },
             modifier = Modifier.padding(top = 12.dp, bottom = 24.dp),
         )
-        Button(onClick = onAllow, modifier = Modifier.fillMaxWidth()) {
-            Text("Allow location")
-        }
         if (blockedForever) {
-            Button(
-                onClick = onOpenSettings,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-            ) {
-                Text("Open settings")
+            Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+                Text("Open Settings")
+            }
+        } else {
+            Button(onClick = onAllow, modifier = Modifier.fillMaxWidth()) {
+                Text("Allow location permission")
             }
         }
     }

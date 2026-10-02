@@ -18,9 +18,15 @@ class TrackerViewModel(application: Application) : AndroidViewModel(application)
     fun refreshOnResume() {
         val context = getApplication<Application>()
         repository.refreshGps()
-        if (!LocationPermissions.hasAnyLocation(context)) {
-            stopLiveTracking()
-            return
+        val hasLocation = LocationPermissions.hasAnyLocation(context)
+        val hasNotification = LocationPermissions.hasNotificationPermission(context)
+        val gpsOn = LocationPermissions.isGpsOn(context)
+
+        if (!hasLocation || !hasNotification || !gpsOn) {
+            if (isLiveTracking.value) {
+                stopLiveTracking()
+            }
+            if (!hasLocation) return
         }
         repository.loadCurrentLocation()
     }
@@ -28,6 +34,7 @@ class TrackerViewModel(application: Application) : AndroidViewModel(application)
     fun startLiveTracking() {
         val context = getApplication<Application>()
         if (!LocationPermissions.hasAnyLocation(context)) return
+        if (!LocationPermissions.hasNotificationPermission(context)) return
         if (!LocationPermissions.isGpsOn(context)) return
         LocationTrackingService.start(context)
     }

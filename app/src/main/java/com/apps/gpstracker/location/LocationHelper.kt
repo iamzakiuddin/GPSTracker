@@ -187,10 +187,6 @@ class LocationHelper(context: Context) {
         onLiveLocation?.invoke(candidate)
     }
 
-    /**
-     * Near tall buildings GNSS can jump to a new but much less accurate point.
-     * Keep the last good location until a newer and reasonably accurate one arrives.
-     */
     private fun isBetterLocation(
         candidate: DeviceLocation,
         current: DeviceLocation?,

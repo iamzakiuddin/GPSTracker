@@ -2,10 +2,13 @@ package com.apps.gpstracker.location
 
 import android.Manifest
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationManagerCompat
@@ -16,12 +19,14 @@ import com.apps.gpstracker.permission.LocationPermissions
 class LocationTrackingService : Service() {
     private val repository by lazy { LocationRepository.get(this) }
 
-    private val gpsReceiver = object : android.content.BroadcastReceiver() {
+    private val gpsReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             repository.refreshGps()
-            if (LocationPermissions.isGpsOn(this@LocationTrackingService) &&
-                hasLocationPermission()
+            if (!LocationPermissions.isGpsOn(this@LocationTrackingService) ||
+                !hasRequiredPermissions()
             ) {
+                stopEverything()
+            } else {
                 startUpdates()
             }
         }
@@ -30,9 +35,9 @@ class LocationTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         TrackingNotifier.ensureChannel(this)
-        val filter = android.content.IntentFilter().apply {
-            addAction(android.location.LocationManager.PROVIDERS_CHANGED_ACTION)
-            addAction(android.location.LocationManager.MODE_CHANGED_ACTION)
+        val filter = IntentFilter().apply {
+            addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+            addAction(LocationManager.MODE_CHANGED_ACTION)
         }
         ContextCompat.registerReceiver(this, gpsReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
     }
@@ -43,7 +48,7 @@ class LocationTrackingService : Service() {
             return START_NOT_STICKY
         }
 
-        if (!hasLocationPermission()) {
+        if (!hasRequiredPermissions() || !LocationPermissions.isGpsOn(this)) {
             stopEverything()
             return START_NOT_STICKY
         }
@@ -71,15 +76,7 @@ class LocationTrackingService : Service() {
     }
 
     private fun startUpdates() {
-        val fineGranted = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED
-        val coarseGranted = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!fineGranted && !coarseGranted) return
+        if (!hasRequiredPermissions()) return
 
         try {
             repository.helper.startLiveUpdates { location ->
@@ -87,6 +84,7 @@ class LocationTrackingService : Service() {
                 updateNotification(location)
             }
         } catch (_: SecurityException) {
+            stopEverything()
         }
     }
 
@@ -126,7 +124,7 @@ class LocationTrackingService : Service() {
         stopSelf()
     }
 
-    private fun hasLocationPermission(): Boolean {
+    private fun hasRequiredPermissions(): Boolean {
         val fineGranted = ContextCompat.checkSelfPermission(
             this,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -135,7 +133,9 @@ class LocationTrackingService : Service() {
             this,
             Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
-        return fineGranted || coarseGranted
+        val locationGranted = fineGranted || coarseGranted
+        val notificationGranted = LocationPermissions.hasNotificationPermission(this)
+        return locationGranted && notificationGranted
     }
 
     companion object {
@@ -146,7 +146,6 @@ class LocationTrackingService : Service() {
             try {
                 ContextCompat.startForegroundService(context, intent)
             } catch (_: Exception) {
-
             }
         }
 

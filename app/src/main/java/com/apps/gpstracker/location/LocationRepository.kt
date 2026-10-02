@@ -34,6 +34,9 @@ class LocationRepository private constructor(context: Context) {
     private val gpsReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             refreshGps()
+            if (_gpsOn.value && LocationPermissions.hasAnyLocation(appContext)) {
+                loadCurrentLocation()
+            }
         }
     }
 
@@ -56,6 +59,7 @@ class LocationRepository private constructor(context: Context) {
 
     fun loadCurrentLocation() {
         refreshGps()
+        if (!LocationPermissions.hasAnyLocation(appContext) || !_gpsOn.value) return
         helper.getLatestLocation { latest ->
             if (latest != null) {
                 _latestLocation.value = latest
